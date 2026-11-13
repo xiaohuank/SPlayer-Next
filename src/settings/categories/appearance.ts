@@ -139,16 +139,14 @@ const appearanceCategory: SettingCategory = {
           defaultValue: "default",
         },
         {
-          key: "routeTransition",
+          key: "songListStyle",
           type: "select",
-          binding: { store: "settings", path: "appearance.routeTransition" },
+          binding: { store: "settings", path: "appearance.songListStyle" },
           options: [
-            { value: "none", labelKey: "settings.routeTransition.none" },
-            { value: "fade", labelKey: "settings.routeTransition.fade" },
-            { value: "slide", labelKey: "settings.routeTransition.slide" },
-            { value: "zoom", labelKey: "settings.routeTransition.zoom" },
+            { value: "comfortable", labelKey: "settings.songListStyle.comfortable" },
+            { value: "compact", labelKey: "settings.songListStyle.compact" },
           ],
-          defaultValue: "fade",
+          defaultValue: "comfortable",
         },
         {
           key: "sidebarCollapsed",
@@ -168,15 +166,38 @@ const appearanceCategory: SettingCategory = {
           component: SidebarCustomizeConfig,
         },
         {
-          key: "showStatsInSidebar",
-          type: "switch",
-          binding: { store: "settings", path: "appearance.showStatsInSidebar" },
-          defaultValue: true,
-        },
-        {
           key: "showQualitySwitch",
           type: "switch",
           binding: { store: "settings", path: "appearance.showQualitySwitch" },
+          defaultValue: false,
+        },
+      ],
+    },
+    {
+      id: "softwareAnimations",
+      items: [
+        {
+          key: "reduceMotion",
+          type: "switch",
+          binding: { store: "settings", path: "appearance.reduceMotion" },
+          defaultValue: false,
+        },
+        {
+          key: "routeTransition",
+          type: "select",
+          binding: { store: "settings", path: "appearance.routeTransition" },
+          options: [
+            { value: "none", labelKey: "settings.routeTransition.none" },
+            { value: "fade", labelKey: "settings.routeTransition.fade" },
+            { value: "slide", labelKey: "settings.routeTransition.slide" },
+            { value: "zoom", labelKey: "settings.routeTransition.zoom" },
+          ],
+          defaultValue: "fade",
+        },
+        {
+          key: "seamlessTransition",
+          type: "switch",
+          binding: { store: "settings", path: "appearance.seamlessTransition" },
           defaultValue: false,
         },
       ],
@@ -189,6 +210,19 @@ const appearanceCategory: SettingCategory = {
           type: "switch",
           binding: { store: "settings", path: "player.showLyricInBar" },
           defaultValue: true,
+          children: [
+            {
+              key: "barLyricMode",
+              type: "select",
+              binding: { store: "settings", path: "player.barLyricMode" },
+              options: [
+                { value: "lyric", labelKey: "settings.barLyricMode.lyric" },
+                { value: "translation", labelKey: "settings.barLyricMode.translation" },
+                { value: "word", labelKey: "settings.barLyricMode.word" },
+              ],
+              defaultValue: "translation",
+            },
+          ],
         },
         {
           key: "showProgressTooltip",
@@ -225,7 +259,82 @@ const appearanceCategory: SettingCategory = {
       ],
     },
     {
-      id: "nowPlaying",
+      id: "fullPlayer",
+      items: [
+        {
+          key: "playerLayout",
+          type: "select",
+          binding: { store: "settings", path: "player.layout" },
+          options: [
+            { value: "classic", labelKey: "settings.playerLayout.classic" },
+            { value: "fullCover", labelKey: "settings.playerLayout.fullCover" },
+            { value: "fullLyric", labelKey: "settings.playerLayout.fullLyric" },
+            { value: "apple", labelKey: "settings.playerLayout.apple" },
+          ],
+          defaultValue: "classic",
+          // 封面占比与自动居中只作用于经典布局
+          childrenCondition: () => useSettingsStore().player.layout === "classic",
+          hideChildren: true,
+          children: [
+            {
+              key: "coverLyricRatio",
+              type: "slider",
+              binding: { store: "settings", path: "player.coverLyricRatio" },
+              min: 0.3,
+              max: 0.6,
+              step: 0.05,
+              defaultValue: 0.45,
+              marks: { 0.3: "30%", 0.45: "45%", 0.6: "60%" },
+            },
+            {
+              key: "autoCenterCover",
+              type: "switch",
+              binding: { store: "settings", path: "player.autoCenterCover" },
+              defaultValue: true,
+            },
+          ],
+        },
+        {
+          key: "showPlaybackSource",
+          type: "switch",
+          binding: { store: "settings", path: "player.showPlaybackSource" },
+          defaultValue: false,
+        },
+        {
+          key: "followCoverColor",
+          type: "switch",
+          binding: { store: "settings", path: "player.followCoverColor" },
+          defaultValue: true,
+        },
+        {
+          key: "motionCover",
+          type: "select",
+          binding: { store: "settings", path: "player.motionCoverSource" },
+          options: [
+            { value: "off", labelKey: "settings.motionCover.off" },
+            { value: "ncm", labelKey: "settings.motionCover.ncm" },
+            { value: "am", labelKey: "settings.motionCover.am" },
+            { value: "amFirst", labelKey: "settings.motionCover.amFirst" },
+          ],
+          defaultValue: "off",
+          tag: { text: "Beta" },
+        },
+        {
+          key: "autoImmersive",
+          type: "switch",
+          binding: { store: "settings", path: "player.autoImmersive" },
+          defaultValue: false,
+        },
+        {
+          key: "keepScreenAwake",
+          type: "switch",
+          binding: { store: "settings", path: "system.player.keepScreenAwake" },
+          defaultValue: false,
+        },
+      ],
+    },
+    {
+      id: "playerBackground",
       items: [
         {
           key: "playerBgType",
@@ -246,6 +355,17 @@ const appearanceCategory: SettingCategory = {
           childrenCondition: () => useSettingsStore().player.playerBgType === "animation",
           hideChildren: true,
           children: [
+            {
+              key: "playerBgRenderer",
+              type: "select",
+              binding: { store: "settings", path: "player.playerBgRenderer" },
+              options: [
+                { value: "mesh", labelKey: "settings.playerBgRenderer.mesh" },
+                { value: "isolation", labelKey: "settings.playerBgRenderer.isolation" },
+                { value: "pixi", labelKey: "settings.playerBgRenderer.pixi" },
+              ],
+              defaultValue: "mesh",
+            },
             {
               key: "playerBgFlowSpeed",
               type: "slider",
@@ -286,53 +406,10 @@ const appearanceCategory: SettingCategory = {
               key: "playerBgBeat",
               type: "switch",
               binding: { store: "settings", path: "player.playerBgBeat" },
+              visible: () => useSettingsStore().player.playerBgRenderer === "mesh",
               defaultValue: false,
             },
           ],
-        },
-        {
-          key: "coverLayout",
-          type: "select",
-          binding: { store: "settings", path: "player.coverLayout" },
-          options: [
-            { value: "default", labelKey: "settings.coverLayout.default" },
-            { value: "fullscreen", labelKey: "settings.coverLayout.fullscreen" },
-          ],
-          defaultValue: "default",
-        },
-        {
-          key: "coverLyricRatio",
-          type: "slider",
-          binding: { store: "settings", path: "player.coverLyricRatio" },
-          min: 0.3,
-          max: 0.6,
-          step: 0.05,
-          defaultValue: 0.45,
-          marks: { 0.3: "30%", 0.45: "45%", 0.6: "60%" },
-        },
-        {
-          key: "autoCenterCover",
-          type: "switch",
-          binding: { store: "settings", path: "player.autoCenterCover" },
-          defaultValue: true,
-        },
-        {
-          key: "showPlaybackSource",
-          type: "switch",
-          binding: { store: "settings", path: "player.showPlaybackSource" },
-          defaultValue: false,
-        },
-        {
-          key: "followCoverColor",
-          type: "switch",
-          binding: { store: "settings", path: "player.followCoverColor" },
-          defaultValue: true,
-        },
-        {
-          key: "autoImmersive",
-          type: "switch",
-          binding: { store: "settings", path: "player.autoImmersive" },
-          defaultValue: false,
         },
       ],
     },

@@ -1,6 +1,6 @@
-type CacheKind = "file" | "db";
+export type CacheKind = "file" | "db";
 
-interface CacheStat {
+export interface CacheStat {
   id: string;
   kind: CacheKind;
   path: string;
@@ -12,6 +12,7 @@ const stats = ref<CacheStat[]>([
   { id: "artists", kind: "file", path: "", size: 0 },
   { id: "backgrounds", kind: "file", path: "", size: 0 },
   { id: "songs", kind: "file", path: "", size: 0 },
+  { id: "motionCovers", kind: "file", path: "", size: 0 },
   { id: "lyric", kind: "db", path: "", size: 0 },
   { id: "lyricTTML", kind: "db", path: "", size: 0 },
   { id: "lyricMatch", kind: "db", path: "", size: 0 },
@@ -53,5 +54,3 @@ export const useCacheStats = () => ({
   refresh,
   setCacheDir,
 });
-
-export type { CacheKind, CacheStat };

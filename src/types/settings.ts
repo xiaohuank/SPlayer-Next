@@ -1,13 +1,20 @@
-import type { LyricFormat } from "@shared/types/lyrics";
+import type { LyricFormat } from "lyric-kit";
+
 import { DEFAULT_LYRIC_FORMAT_ORDER as DEFAULT_LYRIC_FORMAT_ORDER_SHARED } from "@shared/types/lyrics";
 import type { Platform } from "@shared/types/platform";
+import type { MotionCoverSource, TransitionPreference } from "@shared/types/player";
+import type { TransitionMode } from "@shared/types/automix";
 import { ALL_PLATFORMS } from "@shared/types/platform";
 import type { CjkTransformMode } from "@shared/types/opencc";
 import type { QualityLevel } from "@/utils/quality";
+import type { LyricAlignment } from "lyric-dom";
 
 /** 播放器背景类型 */
 export type PlayerBgType = "blur" | "solid" | "animation";
-export type CoverLayout = "default" | "fullscreen";
+/** 流体背景渲染引擎 */
+export type PlayerBgRenderer = "mesh" | "isolation" | "pixi";
+/** 全屏播放器布局 */
+export type PlayerLayout = "classic" | "fullCover" | "fullLyric" | "apple";
 
 /**
  * 歌曲播放时间显示格式
@@ -18,11 +25,11 @@ export type CoverLayout = "default" | "fullscreen";
 export type TimeFormat = "current-total" | "remaining-total" | "current-remaining";
 
 /**
- * 搜索页播放行为
+ * 列表点击播放的行为
  * - current: 仅播放当前
  * - all: 播放全部
  */
-export type SearchPlayBehavior = "current" | "all";
+export type PlayBehavior = "current" | "all";
 
 /**
  * 歌词来源偏好
@@ -34,6 +41,9 @@ export type LyricSourcePreference = Platform | "auto" | "self";
 
 /** 布局模式 */
 export type LayoutMode = "default" | "sidebar-full" | "floating";
+
+/** 歌曲列表样式 */
+export type SongListStyle = "comfortable" | "compact";
 
 /** 路由切换动效 */
 export type RouteTransition = "none" | "fade" | "slide" | "zoom";
@@ -124,12 +134,18 @@ export interface LyricSettings {
   preferPluginLyric: boolean;
   /** 自动识别背景歌词 */
   detectBackgroundLyrics: boolean;
+  /** 为没有逐字时间的歌词统一生成字级时间戳 */
+  autoGenerateWordByWord: boolean;
   /** 中文繁简转换模式（基于 OpenCC） */
   cjkTransform: CjkTransformMode;
-  /** 字号自适应窗口大小 */
+  /** 字号随窗口高度调整 */
   adaptiveFontSize: boolean;
-  /** 歌词字号（px，自适应关闭时生效） */
+  /** 歌词主行字号（px） */
   fontSize: number;
+  /** 副行字号跟随主行 */
+  translationFontSizeFollowMain: boolean;
+  /** 翻译/音译独立字号（px） */
+  translationFontSize: number;
   /** 歌词字重（100~900） */
   fontWeight: number;
   /** 歌词混合模式 */
@@ -146,12 +162,18 @@ export interface LyricSettings {
   fontFamilyChinese: string;
   /** 是否显示翻译歌词 */
   showTranslation: boolean;
-  /** 是否显示音译歌词 */
+  /** 是否显示词内注音 */
+  showRuby: boolean;
+  /** 是否显示逐行音译 */
   showRomanization: boolean;
-  /** AMLL 是否显示逐行音译 */
-  amllShowLineRomanization: boolean;
-  /** AMLL 是否显示逐词音译 */
-  amllShowWordRomanization: boolean;
+  /** 是否显示逐词音译 */
+  showWordRomanization: boolean;
+  /** 是否启用歌词缩放效果 */
+  enableScale: boolean;
+  /** 是否始终将背景行置于主行下方 */
+  bgAlwaysBelow: boolean;
+  /** 超长行智能换行 */
+  enableBalancedWrap: boolean;
   /** 逐字高亮效果 */
   enableWordHighlight: boolean;
   /** 逐字上浮动画 */
@@ -172,6 +194,8 @@ export interface LyricSettings {
   springStiffness: number;
   /** 激活行对齐位置（0~1） */
   alignPosition: number;
+  /** 歌词水平对齐方式 */
+  alignment: LyricAlignment;
   /** 逐字掩码渐变宽度 */
   wordFadeWidth: number;
   /** 非激活行透明度 */
@@ -199,7 +223,6 @@ export interface LyricSettings {
   /** AMLL 歌词优化 */
   amllCleanUnintentionalOverlaps: boolean;
   amllTryAdvanceStartTime: boolean;
-  amllConvertExcessiveBackgroundLines: boolean;
   amllSyncMainAndBackgroundLines: boolean;
   amllNormalizeSpaces: boolean;
   amllResetLineTimestamps: boolean;
@@ -209,6 +232,8 @@ export interface LyricSettings {
 export interface PlayerSettings {
   /** 播放器背景类型 */
   playerBgType: PlayerBgType;
+  /** 流体背景渲染引擎 */
+  playerBgRenderer: PlayerBgRenderer;
   /** 流体背景帧率（fps） */
   playerBgFps: number;
   /** 流体背景流动速度 */
@@ -219,8 +244,8 @@ export interface PlayerSettings {
   playerBgFreezeOnPause: boolean;
   /** 流体背景随低频节拍脉动 */
   playerBgBeat: boolean;
-  /** 全屏播放器封面布局 */
-  coverLayout: CoverLayout;
+  /** 全屏播放器布局 */
+  layout: PlayerLayout;
   /** 播放页封面/歌词分栏占比（0-1，封面侧宽度） */
   coverLyricRatio: number;
   /** 无歌词时自动居中封面并隐藏歌词区域 */
@@ -229,12 +254,16 @@ export interface PlayerSettings {
   showPlaybackSource: boolean;
   /** 颜色是否跟随封面 */
   followCoverColor: boolean;
+  /** 全屏播放器动态封面来源 */
+  motionCoverSource: MotionCoverSource;
   /** 全屏播放器自动进入沉浸模式（隐藏顶/底栏与鼠标） */
   autoImmersive: boolean;
   /** 输出设备 ID（cpal DeviceId），null 表示跟随系统默认 */
   outputDevice: string | null;
   /** 切换输出设备时暂停播放 */
   pauseOnDeviceSwitch: boolean;
+  /** 是否为不同输出设备独立记忆音量 */
+  rememberDeviceVolume: boolean;
   /** 是否启用音乐频谱可视化 */
   enableSpectrum: boolean;
   /** 频谱单条宽度（px） */
@@ -255,18 +284,34 @@ export interface PlayerSettings {
   snapToLyric: boolean;
   /** 播放时底部显示歌词而非歌手名 */
   showLyricInBar: boolean;
+  /** 底部歌词展示模式 */
+  barLyricMode: "lyric" | "translation" | "word";
   /** 播放时提前获取下一首的播放数据 */
   preloadNextTrack: boolean;
+  /** 相邻曲目的播放过渡方式 */
+  transitionMode: TransitionMode;
+  /** 曲尾交接时机与淡化时长偏好 */
+  transitionPreference: TransitionPreference;
+  /** AutoMix 对拍与原速桥接都不适用时是否改用交叉过渡，关闭时直接切歌 */
+  automixCrossfadeFallback: boolean;
   /** 搜索页播放行为 */
-  searchPlayBehavior: SearchPlayBehavior;
+  searchPlayBehavior: PlayBehavior;
+  /** 歌曲列表行首播放按钮的行为 */
+  songListPlayBehavior: PlayBehavior;
 }
 
 /** 外观设置 */
 export interface AppearanceSettings {
   /** 布局模式 */
   layoutMode: LayoutMode;
+  /** 歌曲列表样式 */
+  songListStyle: SongListStyle;
   /** 路由切换动效 */
   routeTransition: RouteTransition;
+  /** 页面之间的共享元素过渡 */
+  seamlessTransition: boolean;
+  /** 减弱界面动画 */
+  reduceMotion: boolean;
   /** 侧边栏折叠 */
   sidebarCollapsed: boolean;
   /** 侧边栏歌单项显示封面 */
@@ -281,8 +326,6 @@ export interface AppearanceSettings {
   sidebarNameWithDivider: boolean;
   /** 侧边栏歌单显示顺序 */
   sidebarPlaylistOrder: SidebarPlaylistOrder;
-  /** 侧边栏显示播放统计入口 */
-  showStatsInSidebar: boolean;
   /** 播放栏显示快捷音质切换 */
   showQualitySwitch: boolean;
   /** 点击关闭按钮的行为 */
@@ -297,10 +340,10 @@ export interface AppearanceSettings {
 
 /** 强迫症设置 */
 export interface PresetSettings {
-  /** Fuck DJ Mode */
-  fuckDjMode: boolean;
-  /** Fuck ** Mode */
-  uncensorProfanity: boolean;
+  /** 跳过指定关键词歌曲 */
+  skipKeywordsSongs: boolean;
+  /** 跳过指定关键词列表 */
+  skipTrackKeywords: string[];
   /** 隐藏歌曲列表的 VIP 标签 */
   hideVipTag: boolean;
   /** 隐藏歌曲列表的音质标签 */

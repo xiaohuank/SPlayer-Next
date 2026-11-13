@@ -1,14 +1,19 @@
 import type { MediaInfo, PlaybackContext, Track, TrackDetail } from "@shared/types/player";
-import type { LyricData, LyricFormat, LyricInput, LyricLine } from "@shared/types/lyrics";
-import { findLyricIndex } from "@shared/utils/lyric";
+import type { LyricFormat, LyricInput, LyricLine } from "lyric-kit";
+import type { LyricData } from "@shared/types/lyrics";
+
 import { useSettingsStore } from "@/stores/settings";
 import { watchLyricPreference } from "@/services/lyric/loader";
-import { parseLyric } from "@/utils/lyric/parse";
-import { applyLyricLanguages } from "@/utils/lyric/language";
-import { extractLyricAuthors } from "@/utils/lyric/author";
+import {
+  applyLyricLanguages,
+  applyTimestampOffset,
+  clampLastLineEnd,
+  extractLyricAuthors,
+  findLyricIndex,
+  normalizeLyricLines,
+  parseLyric,
+} from "lyric-kit";
 import { applyLyricExclude } from "@/utils/lyric/lyricStripper";
-import { normalizeLyricLines } from "@/utils/lyric/normalize";
-import { applyProfanityUncensor } from "@/utils/preset/profanity";
 import { applyLyricCjkTransform } from "@/utils/lyric/cjkTransform";
 
 export const useMediaStore = defineStore("media", () => {
@@ -37,6 +42,7 @@ export const useMediaStore = defineStore("media", () => {
 
   /** 当前歌词格式 */
   const lyricFormat = computed((): LyricFormat | null => activeLyric.value?.format ?? null);
+  const wordTimed = computed(() => activeLyric.value?.wordTimed ?? false);
 
   /** 当前歌词解析结果 */
   const parsedLyric = shallowRef<LyricLine[]>([]);
@@ -123,6 +129,7 @@ export const useMediaStore = defineStore("media", () => {
 
   /** 重置歌词状态 */
   const resetLyricState = (): void => {
+    transformToken++;
     activeLyric.value = null;
     lyricContent.value = null;
     parsedLyric.value = [];
@@ -135,9 +142,9 @@ export const useMediaStore = defineStore("media", () => {
   /** 简繁转换竞态 token */
   let transformToken = 0;
 
-  // 监听简繁转换及强迫症设置变化并重新解析当前歌词
+  // 从原文重新解析，关闭自动生成后不会残留估算时间戳
   watch(
-    () => [useSettingsStore().lyric.cjkTransform, useSettingsStore().preset.uncensorProfanity],
+    () => [useSettingsStore().lyric.cjkTransform, useSettingsStore().lyric.autoGenerateWordByWord],
     () => {
       if (activeLyric.value && lyricContent.value) {
         setLyric(activeLyric.value, lyricContent.value);
@@ -151,20 +158,61 @@ export const useMediaStore = defineStore("media", () => {
    * @param input - 主歌词 + 可选翻译 / 音译；传 null 即清空
    */
   const setLyric = (source: LyricData, input: LyricInput | null): void => {
+    const token = ++transformToken;
     let nextLines: LyricLine[] = [];
+    let authors: string[] = [];
+    let hasWordTiming = false;
     const settings = useSettingsStore();
     if (source && input) {
       try {
-        const lines = parseLyric(input, source.format, settings.locale, {
-          detectBackground: settings.lyric.detectBackgroundLyrics,
-        });
-        nextLines = applyLyricExclude(lines, track.value);
+        const result = parseLyric(
+          {
+            content: input.content,
+            format: source.format,
+            translation: input.translation,
+            translationFormat: input.translationFormat,
+            romaji: input.romaji,
+            romajiFormat: input.romajiFormat,
+          },
+          {
+            detectBackground: settings.lyric.detectBackgroundLyrics,
+            preferredLang: settings.locale,
+            cleanKangxi: true,
+            extractMetadata: true,
+          },
+        );
+        if (source.timeShiftMs) applyTimestampOffset(result.lines, source.timeShiftMs);
+        nextLines = applyLyricExclude(result.lines, track.value);
         normalizeLyricLines(nextLines);
-        // Fuck Mode
-        if (settings.preset.uncensorProfanity) {
-          applyProfanityUncensor(nextLines);
+        nextLines = clampLastLineEnd(nextLines, track.value?.duration);
+        const segmenter = settings.lyric.autoGenerateWordByWord
+          ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+          : null;
+        for (const line of nextLines) {
+          const timed =
+            (line.words.length > 1 ||
+              ["ttml", "lys", "yrc", "qrc", "krc"].includes(source.format)) &&
+            line.words.some((word) => word.endTime > word.startTime);
+          if (timed) {
+            hasWordTiming = true;
+            continue;
+          }
+          if (!segmenter || line.endTime <= line.startTime) continue;
+          const text = line.words.map((word) => word.word).join("");
+          const characters = Array.from(segmenter.segment(text), (part) => part.segment);
+          if (!characters.length) continue;
+          const duration = line.endTime - line.startTime;
+          line.words = characters.map((word, index) => ({
+            word,
+            startTime: line.startTime + Math.round((duration * index) / characters.length),
+            endTime: line.startTime + Math.round((duration * (index + 1)) / characters.length),
+          }));
+          hasWordTiming = true;
         }
         applyLyricLanguages(nextLines);
+        authors = result.metadata.authors?.length
+          ? result.metadata.authors
+          : extractLyricAuthors(input.content, source.format);
       } catch (e) {
         console.error("[media] parse lyric failed:", e);
         nextLines = [];
@@ -172,11 +220,10 @@ export const useMediaStore = defineStore("media", () => {
     }
     // 解析后无有效行视作无歌词
     const hasContent = nextLines.length > 0;
-    activeLyric.value = hasContent ? source : null;
+    activeLyric.value = hasContent && source ? { ...source, wordTimed: hasWordTiming } : null;
     lyricContent.value = hasContent ? input : null;
     parsedLyric.value = nextLines;
-    lyricAuthors.value =
-      hasContent && source && input ? extractLyricAuthors(input.content, source.format) : [];
+    lyricAuthors.value = hasContent && source && input ? authors : [];
     lyricIndex.value = -1;
     lyricLoading.value = false;
     syncToMain();
@@ -184,7 +231,6 @@ export const useMediaStore = defineStore("media", () => {
     // 应用 OpenCC 简繁转换
     const cjkMode = settings.lyric.cjkTransform;
     if (hasContent && cjkMode && cjkMode !== "none") {
-      const token = ++transformToken;
       applyLyricCjkTransform(nextLines, cjkMode).then((transformed) => {
         if (token !== transformToken) return;
         parsedLyric.value = transformed;
@@ -203,6 +249,7 @@ export const useMediaStore = defineStore("media", () => {
 
   /** 清空所有状态 */
   const clear = (): void => {
+    transformToken++;
     track.value = null;
     playbackContext.value = undefined;
     detail.value = null;
@@ -222,6 +269,7 @@ export const useMediaStore = defineStore("media", () => {
     activeLyric,
     lyricContent,
     lyricFormat,
+    wordTimed,
     parsedLyric,
     lyricAuthors,
     lyricLoading,

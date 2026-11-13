@@ -1,57 +1,33 @@
 <script setup lang="ts">
-import { settingsSchema } from "@/settings/schema";
+import { searchSettings, type SettingSearchResult } from "@/settings/searchSettings";
 
 const emit = defineEmits<{
-  select: [categoryId: string, itemKey: string];
+  select: [categoryId: string, itemKey: string, parentKeys: string[]];
   "active-change": [active: boolean];
 }>();
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const query = ref("");
 const isFocused = ref(false);
 
-const isSearchActive = computed(() => isFocused.value && query.value.length > 0);
+const isSearchActive = computed(() => isFocused.value && query.value.trim().length > 0);
 
 watch(isSearchActive, (v) => emit("active-change", v));
 
-interface SearchResult {
-  categoryId: string;
-  itemKey: string;
-  label: string;
-  description: string;
-  categoryLabel: string;
-}
+const results = computed(() =>
+  searchSettings(
+    query.value,
+    (key) => t(key),
+    (key) => te(key),
+  ),
+);
 
-const results = computed<SearchResult[]>(() => {
-  const q = query.value.trim().toLowerCase();
-  if (!q) return [];
-  const out: SearchResult[] = [];
-  for (const cat of settingsSchema) {
-    for (const sec of cat.sections ?? []) {
-      if (sec.visible && !sec.visible()) continue;
-      for (const item of sec.items) {
-        if (item.visible && !item.visible()) continue;
-        if (item.searchable === false) continue;
-        const label = t(`settings.${item.key}.label`);
-        const desc = item.hideDescription ? "" : t(`settings.${item.key}.description`);
-        const kw = item.keywords?.map((k) => t(k)).join(" ") ?? "";
-        if (`${label} ${desc} ${kw}`.toLowerCase().includes(q)) {
-          out.push({
-            categoryId: cat.id,
-            itemKey: item.key,
-            label,
-            description: desc,
-            categoryLabel: t(`settings.group.${cat.id}`),
-          });
-        }
-      }
-    }
-  }
-  return out;
-});
-
-const handleSelect = (r: SearchResult) => {
-  emit("select", r.categoryId, r.itemKey);
+/**
+ * 定位搜索结果并清空输入
+ * @param r - 选中的设置项
+ */
+const handleSelect = (r: SettingSearchResult) => {
+  emit("select", r.categoryId, r.itemKey, r.parentKeys);
   query.value = "";
 };
 
@@ -83,7 +59,7 @@ const handleBlur = () => {
     >
       <div
         v-if="isSearchActive"
-        class="absolute left-0 right-0 top-full mt-2 max-h-[calc(75vh-220px)] overflow-y-auto rounded-lg border border-solid border-outline-variant/80 z-10 p-1"
+        class="motion-enter absolute left-0 right-0 top-full mt-2 max-h-[calc(75vh-220px)] overflow-y-auto rounded-lg border border-solid border-outline-variant/80 z-10 p-1"
       >
         <template v-if="results.length > 0">
           <div

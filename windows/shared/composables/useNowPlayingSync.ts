@@ -1,8 +1,9 @@
 import type { Ref, ShallowRef } from "vue";
-import type { LyricLine } from "@shared/types/lyrics";
+import type { LyricLine } from "lyric-kit";
+
 import type { NowPlayingSnapshot } from "@shared/types/nowPlaying";
 import type { Track } from "@shared/types/player";
-import { clampLastLineEnd } from "@shared/utils/lyricSync";
+import { clampLastLineEnd } from "lyric-kit";
 
 /** 同步偏差阈值 */
 const SYNC_DRIFT_THRESHOLD = 300;
@@ -22,6 +23,7 @@ export interface NowPlayingSyncOptions {
 export interface NowPlayingSync {
   track: ShallowRef<Track | null>;
   lyric: ShallowRef<LyricLine[]>;
+  wordTimed: Ref<boolean>;
   playing: Ref<boolean>;
   primaryIndex: Ref<number>;
 }
@@ -35,6 +37,7 @@ export const useNowPlayingSync = (options: NowPlayingSyncOptions): NowPlayingSyn
 
   const track = shallowRef<Track | null>(null);
   const lyric = shallowRef<LyricLine[]>([]);
+  const wordTimed = ref(false);
   const playing = ref(false);
   const primaryIndex = ref(-1);
 
@@ -49,7 +52,7 @@ export const useNowPlayingSync = (options: NowPlayingSyncOptions): NowPlayingSyn
 
   const resetAnchor = (positionMs: number, sendTimestamp: number): void => {
     const ipcDelay = Math.max(0, Date.now() - sendTimestamp);
-    anchorPos = positionMs + (playing.value ? ipcDelay : 0);
+    anchorPos = positionMs + (playing.value ? ipcDelay * speed : 0);
     anchorPerf = performance.now();
     // currentNowPlayingMs 始终是「叠加 offset 后的歌词时间」，与 syncOnce 保持一致
     currentNowPlayingMs = anchorPos + lyricOffsetMs;
@@ -74,15 +77,20 @@ export const useNowPlayingSync = (options: NowPlayingSyncOptions): NowPlayingSyn
       return;
     }
     const ipcDelay = Math.max(0, Date.now() - sendTimestamp);
-    const candidate = positionMs + ipcDelay;
+    const candidate = positionMs + ipcDelay * speed;
     const projected = anchorPos + (performance.now() - anchorPerf) * speed;
     if (Math.abs(candidate - projected) > SYNC_DRIFT_THRESHOLD) {
       resetAnchor(positionMs, sendTimestamp);
     }
   };
 
+  /**
+   * 应用歌词和播放快照，保留统一解析得到的逐字标记
+   * @param snap - 主进程同步的当前播放快照
+   */
   const applySnapshot = (snap: NowPlayingSnapshot): void => {
     track.value = snap.track;
+    wordTimed.value = snap.source?.wordTimed ?? false;
     const mainLines = snap.lyric.filter((line) => !line.isBG);
     lyric.value = clampLastLineEnd(mainLines, snap.track?.duration);
     playing.value = snap.playing;
@@ -147,5 +155,5 @@ export const useNowPlayingSync = (options: NowPlayingSyncOptions): NowPlayingSyn
     for (const off of unsubscribers) off();
   });
 
-  return { track, lyric, playing, primaryIndex };
+  return { track, lyric, wordTimed, playing, primaryIndex };
 };

@@ -11,22 +11,27 @@ import {
 } from "@main/window";
 import { isMac } from "@main/utils/config";
 import { registerIpcHandlers } from "@main/ipc";
-import { init as initMedia, shutdown as shutdownMedia } from "@main/services/media";
+import { init as initMedia } from "@main/services/media";
 import { init as initLastfm } from "@main/services/lastfm";
 import { initGlobalHotkey } from "@main/services/globalHotkey";
-import { initDatabase, closeDatabase } from "@main/database";
+import { initDatabase } from "@main/database";
 import { init as initSongCache } from "@main/services/songCache";
 import { init as initDownload } from "@main/services/downloadManager";
 import { pluginRegistry } from "@main/plugins/registry";
+import { init as initPlaybackBridge } from "@main/plugins/playbackBridge";
 import {
-  init as initPlaybackBridge,
-  dispose as disposePlaybackBridge,
-} from "@main/plugins/playbackBridge";
-import { registerCacheScheme, handleCacheProtocol } from "@main/utils/protocol";
-import { startServer, stopServer } from "@main/server";
-import { startMcpServer, stopMcpServer } from "@main/services/mcp/http";
-import { initUpdater, disposeUpdater } from "@main/services/updater";
+  registerCacheScheme,
+  handleCacheProtocol,
+  handleCacheProtocolOnPartition,
+  MAIN_PARTITION,
+} from "@main/utils/protocol";
+import { startServer } from "@main/server";
+import { startMcpServer } from "@main/services/mcp/http";
+import { initUpdater } from "@main/services/updater";
 import { coreLog, initLogger } from "@main/utils/logger";
+import { initNetworkProxy } from "@main/utils/proxy";
+import { isAppQuitting } from "@main/utils/lifecycle";
+import { initAppLifecycle } from "./lifecycle";
 import {
   initOrpheusRegistration,
   extractOrpheusUrl,
@@ -99,6 +104,8 @@ export const initApp = (): void => {
     event.preventDefault();
     captureAudioFiles([path]);
   });
+  // 应用代理设置
+  initNetworkProxy();
   // 注册缓存协议方案
   registerCacheScheme();
   // 其他初始化
@@ -106,15 +113,30 @@ export const initApp = (): void => {
     electronApp.setAppUserModelId("top.imsyy.splayer-next");
     // 注册 cache:// 协议处理
     handleCacheProtocol();
+    handleCacheProtocolOnPartition(MAIN_PARTITION);
     app.on("browser-window-created", (_, window) => {
       optimizer.watchWindowShortcuts(window);
     });
     // 注册 IPC
-    registerIpcHandlers();
+    let startupComplete = false;
+    registerIpcHandlers(() => {
+      if (startupComplete) return;
+      startupComplete = true;
+      setImmediate(() => {
+        if (isAppQuitting()) return;
+        void startServer();
+        void startMcpServer();
+        void pluginRegistry.checkAllUpdates();
+      });
+    });
     // 初始化数据库
     initDatabase();
     // 创建主窗口
-    createMainWindow();
+    const mainWindow = createMainWindow();
+    // 播放配置同步前准备系统媒体控件，对外服务等待启动层退出。
+    mainWindow.once("show", () => {
+      initMedia();
+    });
     // 注册 orpheus 协议并处理冷启动唤起
     initOrpheusRegistration();
     const coldOrpheusUrl = extractOrpheusUrl(process.argv);
@@ -125,27 +147,22 @@ export const initApp = (): void => {
     void initSongCache();
     // 启动下载服务
     void initDownload();
-    initMedia();
     // 初始化 Last.fm 集成
-    initLastfm();
+    void initLastfm();
     // 初始化插件系统
     pluginRegistry.init();
-    // 初始化播放事件桥（需在 pluginRegistry.init 之后，读 hasEnabledControlPlugin）
+    // 初始化播放事件桥
     initPlaybackBridge();
     // 恢复歌词相关窗口
     restoreLyricWindows();
     // 注册全局快捷键
     initGlobalHotkey();
-    // 启动外部 API 服务
-    void startServer();
-    // 启动 AI 集成 MCP 服务
-    void startMcpServer();
-    // 初始化自动更新
     initUpdater();
     // 周期记录各进程内存
     setTimeout(logProcessMemory, MEMORY_LOG_FIRST_DELAY_MS);
     setInterval(logProcessMemory, MEMORY_LOG_INTERVAL_MS);
     app.on("activate", () => {
+      if (isAppQuitting()) return;
       if (isMac) {
         if (getMainWindow()) focusMainWindow();
         else createMainWindow();
@@ -155,21 +172,5 @@ export const initApp = (): void => {
     });
     coreLog.info("应用初始化完成");
   });
-  // 所有窗口关闭时退出应用
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
-  // 退出前清理
-  app.on("before-quit", () => {
-    coreLog.info("应用即将退出，清理资源");
-    shutdownMedia();
-    closeDatabase();
-    void stopServer();
-    void stopMcpServer();
-    void pluginRegistry.shutdown();
-    disposePlaybackBridge();
-    disposeUpdater();
-  });
+  initAppLifecycle();
 };

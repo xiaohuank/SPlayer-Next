@@ -1,10 +1,8 @@
 import type { Platform } from "./platform";
 import type { Track } from "./player";
+import type { LyricFormat, LyricInput } from "lyric-kit";
 
-/** 歌词格式 */
-export type LyricFormat = "ttml" | "lys" | "yrc" | "qrc" | "krc" | "lrc" | "srt" | "ass";
-
-/** 默认格式优先级（高到低）；本地外挂选择、TTML 升级判定共用 */
+/** 默认格式优先级 */
 export const DEFAULT_LYRIC_FORMAT_ORDER: readonly LyricFormat[] = [
   "ttml",
   "lys",
@@ -19,73 +17,17 @@ export const DEFAULT_LYRIC_FORMAT_ORDER: readonly LyricFormat[] = [
 /** 歌词来源 */
 export type LyricSource = "external" | "embedded" | "online";
 
-/** 歌词行语言；und-Latn 表示语言未知的拉丁文字 */
-export type LyricLanguage = "ja" | "ko" | "zh-CN" | "und-Latn";
-
 /** 歌词数据 */
 export type LyricData = {
   source: LyricSource;
   format: LyricFormat;
+  /** 本次解析结果是否具有真实或统一生成的逐字时间 */
+  wordTimed?: boolean;
   /** 在线歌词所属平台，仅 source=online 时有值 */
   platform?: Platform;
+  /** 与基准比较得出的时间校正量，解析后加到歌词时间上 */
+  timeShiftMs?: number;
 } | null;
-
-/** 歌词时间片段 */
-export interface LyricSpan {
-  /** 起始时间（毫秒） */
-  startTime: number;
-  /** 结束时间（毫秒） */
-  endTime: number;
-  /** 内容 */
-  word: string;
-}
-
-/** 歌词单词 */
-export interface LyricWord extends LyricSpan {
-  /** 音译内容 */
-  romanWord?: string;
-  /** 是否包含不雅用语 */
-  obscene?: boolean;
-  /** 注音（如日语假名标注） */
-  ruby?: LyricSpan[];
-}
-
-/** 一行歌词 */
-export interface LyricLine {
-  /** 主歌词语言，用于字形选择与 HTML lang */
-  language?: LyricLanguage;
-  /**
-   * 该行的所有单词
-   * 如果是 LyRiC 等只能表达一行歌词的格式，这里就只会有一个单词且通常其始末时间和本结构的 `startTime` 和 `endTime` 相同
-   */
-  words: LyricWord[];
-  /** 该行的翻译歌词，将会显示在主歌词行的下方 */
-  translatedLyric: string;
-  /** 该行的音译歌词，将会显示在翻译歌词行的下方 */
-  romanLyric: string;
-  /** 句子的起始时间，单位为毫秒 */
-  startTime: number;
-  /** 句子的结束时间，单位为毫秒 */
-  endTime: number;
-  /** 是否为背景歌词行 */
-  isBG: boolean;
-  /** 是否为对唱歌词行 */
-  isDuet: boolean;
-}
-
-/**
- * 歌词原始内容载荷：主 + 可选翻译 / 音译
- */
-export interface LyricInput {
-  /** 主歌词原始文本 */
-  content: string;
-  /** 翻译原始文本 */
-  translation?: string;
-  translationFormat?: LyricFormat;
-  /** 罗马音原始文本 */
-  romaji?: string;
-  romajiFormat?: LyricFormat;
-}
 
 /** 平台额外字段 */
 export interface LyricMatchExtra {
@@ -106,17 +48,73 @@ export interface LyricMatchResult extends LyricInput {
 export type LyricMatchResponse =
   { ok: true; data: LyricMatchResult | null } | { ok: false; error: string };
 
+/** 手动匹配的歌词来源，ttml 指 AMLL TTML DB */
+export type LyricMatchSource = Platform | "ttml";
+
+/** 用户手动选择的歌词 */
+export interface LyricManualMatch {
+  platform: LyricMatchSource;
+  /** 歌曲 id，KG 为 hash，TTML 为 AMLL 条目 id */
+  id: string;
+  name: string;
+  artist: string;
+  /** 毫秒 */
+  duration?: number;
+}
+
+/** 候选与歌曲吻合的方面 */
+export type LyricCandidateTag = "name" | "artist" | "duration";
+
+/** 歌词搜索候选 */
+export interface LyricSearchCandidate extends LyricManualMatch {
+  album?: string;
+  tags: LyricCandidateTag[];
+  /** 是否为自动匹配规则下的最佳候选 */
+  best: boolean;
+  /** 是否为自动流程在该来源实际使用的歌曲 */
+  autoMatched: boolean;
+}
+
+/** 歌词候选搜索 IPC 响应 */
+export type LyricSearchResponse =
+  { ok: true; data: LyricSearchCandidate[] } | { ok: false; error: string };
+
 /** TTML 抓取 IPC 响应 */
 export type LyricTTMLResponse = { ok: true; data: string | null } | { ok: false; error: string };
 
 /** 渲染端歌词匹配入口 */
 export interface LyricsApi {
-  /** 按 id 直取某平台歌词 */
-  matchById: (platform: Platform, id: string) => Promise<LyricMatchResponse>;
+  /** 按 id 直取某平台歌词，KG 依赖 track 的歌名和时长，prefetch 为 false 时不预热 TTML */
+  matchById: (
+    platform: Platform,
+    id: string,
+    track?: Track,
+    prefetch?: boolean,
+  ) => Promise<LyricMatchResponse>;
   /** 按 Track 元数据在某平台模糊搜索歌词 */
   matchByQuery: (platform: Platform, track: Track) => Promise<LyricMatchResponse>;
+  /** 清除验证不通过的模糊匹配映射 */
+  forgetMatch: (track: Track, platform: Platform) => Promise<void>;
+  /** 记住验证通过的替代候选，下次直接使用 */
+  rememberMatch: (track: Track, platform: Platform, id: string) => Promise<void>;
+  /** 按关键词搜索某来源的歌词候选，并与歌曲比对 */
+  searchCandidates: (
+    platform: LyricMatchSource,
+    keyword: string,
+    track: Track,
+  ) => Promise<LyricSearchResponse>;
+  /** 按 AMLL 条目 id 取 TTML 歌词 */
+  fetchTTMLById: (id: string) => Promise<LyricTTMLResponse>;
+  /** 读取歌曲的手动选择 */
+  getManualMatch: (track: Track) => Promise<LyricManualMatch | null>;
+  /** 保存歌曲的手动选择 */
+  setManualMatch: (track: Track, match: LyricManualMatch) => Promise<void>;
+  /** 清除歌曲的手动选择 */
+  clearManualMatch: (track: Track) => Promise<void>;
   /** 抓取 AMLL TTML DB 的 TTML 歌词，仅 NCM/QM 适用 */
   fetchTTMLOverlay: (track: Track, platform: "netease" | "qqmusic") => Promise<LyricTTMLResponse>;
+  /** 按 Track 元数据搜索 AMLL TTML DB，用于没有可用平台 ID 或 ID 未命中的歌曲 */
+  searchTTML: (track: Track) => Promise<LyricTTMLResponse>;
   /** 在本地 TTML 歌词库中按元信息匹配，命中返回 TTML 原文 */
   matchLocalTTML: (track: Track) => Promise<LyricTTMLResponse>;
   /** 弹出目录选择器，返回所选本地 TTML 歌词库目录 */

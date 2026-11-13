@@ -14,7 +14,10 @@ import {
   setEqualizerEnabled,
   setEqualizerBands,
   setPreampGain,
+  setExclusiveMode,
+  syncEngineProxy,
 } from "@main/services/engine";
+import { applyGlobalFetchProxy, applySessionsProxy } from "@main/utils/proxy";
 import {
   setTaskbarProgress,
   applyMainWindowZoom,
@@ -32,19 +35,22 @@ import { startServer, stopServer } from "@main/server";
 import { startMcpServer, stopMcpServer } from "@main/services/mcp/http";
 import { setOrpheusProtocolRegistered } from "@main/services/orpheus";
 import { setTaskbarThumbnailEnabled } from "@main/services/thumbnail";
-import { applyChannelChange } from "@main/services/updater";
-import type { UpdateChannel } from "@shared/types/settings";
+import { getUpdateState, syncUpdateChannel } from "@main/services/updater";
+import { UPDATE_CHANNELS } from "@shared/types/settings";
+import { refreshPowerBlocker } from "@main/utils/powerBlocker";
 
 /**
  * 应用配置写入后的副作用
  * @param keyPath - 配置路径
  * @param value - 新值
- * @param previous - 写入前的旧值
  */
-const applyConfigChange = (keyPath: string, value: unknown, previous: unknown): void => {
+const applyConfigChange = (keyPath: string, value: unknown): void => {
   switch (keyPath) {
+    case "player.keepScreenAwake":
+      refreshPowerBlocker();
+      break;
     case "update.channel":
-      applyChannelChange(previous as UpdateChannel, value as UpdateChannel);
+      syncUpdateChannel();
       break;
     case "media.systemMediaControls":
       value ? enableMedia() : disableMedia();
@@ -71,6 +77,12 @@ const applyConfigChange = (keyPath: string, value: unknown, previous: unknown): 
       break;
     case "player.equalizer.preamp":
       setPreampGain(value as number);
+      break;
+    case "player.audioOutputMode":
+      // 独占模式仅 Windows 引擎支持；切模式后重建输出立即生效
+      if (isWin) {
+        setExclusiveMode(value === "exclusive");
+      }
       break;
     case "system.taskbarProgress":
       if (!value) setTaskbarProgress(-1);
@@ -117,6 +129,11 @@ const applyConfigChange = (keyPath: string, value: unknown, previous: unknown): 
       if (isWin) applyTaskbarLyricLayout();
       break;
   }
+  if (keyPath.startsWith("system.networkProxy")) {
+    syncEngineProxy();
+    applyGlobalFetchProxy().catch((err) => systemLog.warn("[proxy] apply fetch proxy failed", err));
+    applySessionsProxy().catch((err) => systemLog.warn("[proxy] apply sessions proxy failed", err));
+  }
   // 桌面歌词配置变更广播到所有窗口
   if (keyPath.startsWith("desktopLyric.")) {
     broadcast("desktopLyric:configChange", store.get("desktopLyric"));
@@ -135,24 +152,29 @@ const applyConfigChange = (keyPath: string, value: unknown, previous: unknown): 
 export const registerConfigIpc = (): void => {
   ipcMain.handle("config:get", (_event, keyPath: string) => store.get(keyPath as ConfigPath));
   ipcMain.handle("config:set", (_event, keyPath: string, value: unknown) => {
-    if (
-      keyPath === "update.channel" &&
-      value !== "stable" &&
-      value !== "beta" &&
-      value !== "alpha"
-    ) {
+    if (keyPath === "update.channel" && getUpdateState().phase === "installing") {
+      throw new Error("安装启动中，无法切换更新通道");
+    }
+    if (keyPath === "update.channel" && !UPDATE_CHANNELS.some((channel) => channel === value)) {
       throw new Error(`无效的更新通道: ${String(value)}`);
     }
-    const previous = store.get(keyPath as ConfigPath);
     store.set(keyPath, value);
-    applyConfigChange(keyPath, value, previous);
+    applyConfigChange(keyPath, value);
   });
   ipcMain.handle("config:getAll", () => store.store);
-  ipcMain.handle("config:reset", () => store.clear());
+  ipcMain.handle("config:reset", () => {
+    if (getUpdateState().phase === "installing") throw new Error("安装启动中，无法重置配置");
+    store.clear();
+    syncUpdateChannel();
+    refreshPowerBlocker();
+  });
 
   /** 替换整盘配置 */
   ipcMain.handle("config:replaceAll", (_event, payload: unknown) => {
+    if (getUpdateState().phase === "installing") throw new Error("安装启动中，无法替换配置");
     store.replaceAll(payload);
+    syncUpdateChannel();
+    refreshPowerBlocker();
   });
 
   /** 备份 */

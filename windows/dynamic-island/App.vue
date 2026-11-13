@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { DynamicIslandSettings } from "@shared/types/settings";
-import type { LyricLine } from "@shared/types/lyrics";
+import type { LyricLine } from "lyric-kit";
+
 import { DYNAMIC_ISLAND_BASE_HEIGHT } from "@shared/defaults/settings";
 import DEFAULT_COVER from "@/assets/images/song.jpg";
 import IslandLyricLine from "./components/IslandLyricLine.vue";
-import { pickAdvanceOnEndIndex } from "@shared/utils/lyricSync";
+import { pickAdvanceOnEndIndex } from "lyric-kit";
 import { useNowPlayingSync } from "@windows/shared/composables/useNowPlayingSync";
 import { useDragWindow } from "./composables/useDragWindow";
 import { isMac } from "@/utils/config";
@@ -56,7 +57,7 @@ const shapeBottomRadius = computed(() => Math.max(14, Math.round(coverRadius.val
 const subFontSize = computed(() => Math.max(11, Math.round(fontSize.value * 0.65)));
 const subRowHeight = computed(() => Math.round(subFontSize.value * 1.2));
 
-const { track, lyric, primaryIndex } = useNowPlayingSync({
+const { track, lyric, wordTimed, primaryIndex } = useNowPlayingSync({
   pickIndex: pickAdvanceOnEndIndex,
   logTag: "dynamic-island",
 });
@@ -627,7 +628,7 @@ onBeforeUnmount(() => {
                   :line="fittedDisplayLine"
                   :font-size="fontSize"
                   :font-weight="config.fontWeight"
-                  :word-by-word="config.wordByWord && !mainTextTruncated"
+                  :word-by-word="config.wordByWord && wordTimed && !mainTextTruncated"
                 />
                 <div v-else class="fallback" :style="{ fontSize: `${fontSize}px` }">
                   {{ fittedMainText }}
